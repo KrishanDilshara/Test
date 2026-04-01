@@ -1,18 +1,52 @@
-const User = require("../models/User");
+const bcrypt  = require("bcryptjs");
+const User    = require("../models/User");
+
+// Helper — basic email format check
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 // =====================
 // ADD USER
 // =====================
 exports.addUser = async (req, res) => {
-  const { firstName, lastName, email, role } = req.body;
+  const { firstName, lastName, email, password, role, status } = req.body;
+
+  // Validation
+  if (!firstName || !firstName.trim())
+    return res.status(400).json({ message: "First name is required." });
+  if (!lastName || !lastName.trim())
+    return res.status(400).json({ message: "Last name is required." });
+  if (!email || !email.trim())
+    return res.status(400).json({ message: "Email is required." });
+  if (!isValidEmail(email))
+    return res.status(400).json({ message: "Please enter a valid email address." });
+  if (!password || password.length < 6)
+    return res.status(400).json({ message: "Password must be at least 6 characters." });
+  if (!role || !["student", "lecturer", "admin"].includes(role))
+    return res.status(400).json({ message: "Role must be student, lecturer, or admin." });
 
   try {
-    const newUser = new User({ firstName, lastName, email, role });
-    await newUser.save();
-    res.json("User Added");
+    // Duplicate email check
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existing)
+      return res.status(409).json({ message: "A user with this email already exists." });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = new User({
+      firstName: firstName.trim(),
+      lastName:  lastName.trim(),
+      email:     email.toLowerCase().trim(),
+      password:  hashedPassword,
+      role,
+      status:    status || "Active",
+    });
+
+    const saved = await newUser.save();
+    const { password: _pw, ...userWithoutPassword } = saved.toObject();
+    return res.status(201).json({ message: "User added successfully.", user: userWithoutPassword });
   } catch (err) {
-    console.log(err);
-    res.status(500).send("Error adding user");
+    console.error(err);
+    return res.status(500).json({ message: "Error adding user." });
   }
 };
 
@@ -21,11 +55,11 @@ exports.addUser = async (req, res) => {
 // =====================
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find();
-    res.json(users);
+    const users = await User.find().select("-password").sort({ createdAt: -1 }).lean();
+    return res.json(users);
   } catch (err) {
-    console.log(err);
-    res.status(500).send("Error fetching users");
+    console.error(err);
+    return res.status(500).json({ message: "Error fetching users." });
   }
 };
 
@@ -33,22 +67,29 @@ exports.getAllUsers = async (req, res) => {
 // UPDATE USER
 // =====================
 exports.updateUser = async (req, res) => {
+  const { firstName, lastName, email, role, status } = req.body;
+
+  // Validate email if provided
+  if (email && !isValidEmail(email))
+    return res.status(400).json({ message: "Please enter a valid email address." });
+
   try {
-    const { firstName, lastName, email, role, status } = req.body;
-    let user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json("User not found");
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: "User not found." });
 
-    user.firstName = firstName || user.firstName;
-    user.lastName = lastName || user.lastName;
-    user.email = email || user.email;
-    user.role = role || user.role;
-    user.status = status || user.status;
+    // Only update the fields that were sent
+    if (firstName && firstName.trim()) user.firstName = firstName.trim();
+    if (lastName  && lastName.trim())  user.lastName  = lastName.trim();
+    if (email     && email.trim())     user.email     = email.toLowerCase().trim();
+    if (role      && ["student", "lecturer", "admin"].includes(role)) user.role = role;
+    if (status)                        user.status    = status;
 
-    const updatedUser = await user.save();
-    res.json(updatedUser);
+    const updated = await user.save();
+    const { password: _pw, ...userWithoutPassword } = updated.toObject();
+    return res.json({ message: "User updated successfully.", user: userWithoutPassword });
   } catch (err) {
-    console.log(err);
-    res.status(500).send("Error updating user");
+    console.error(err);
+    return res.status(500).json({ message: "Error updating user." });
   }
 };
 
@@ -58,12 +99,12 @@ exports.updateUser = async (req, res) => {
 exports.deleteUser = async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json("User not found");
+    if (!user) return res.status(404).json({ message: "User not found." });
 
     await user.deleteOne();
-    res.json("User deleted");
+    return res.json({ message: "User deleted successfully." });
   } catch (err) {
-    console.log(err);
-    res.status(500).send("Error deleting user");
+    console.error(err);
+    return res.status(500).json({ message: "Error deleting user." });
   }
 };

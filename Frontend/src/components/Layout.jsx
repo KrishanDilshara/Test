@@ -1,18 +1,24 @@
+import { useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import { useAuth } from "../context/AuthContext";
+import "./Layout.css";
 
 const Layout = ({ children }) => {
     const { user } = useAuth();
+    const location = useLocation();
 
-    if (!user) {
-        return <div className="min-h-screen bg-[#0b0e14] text-slate-300">{children}</div>;
+    // Do not show the sidebar/dashboard layout on Home, Login, or Register pages natively
+    const isPublicPage = ["/", "/login", "/register"].includes(location.pathname);
+
+    if (!user || isPublicPage) {
+        return <div className="layout-root">{children}</div>;
     }
 
     return (
-        <div className="min-h-screen bg-[#0b0e14] text-slate-300 flex">
+        <div className="layout-root layout-root--authenticated">
             <Sidebar />
-            <div className="flex-1 md:ml-64 min-w-0">
-                <main className="p-4 md:p-8 max-w-7xl mx-auto">
+            <div className="layout-content">
+                <main className="layout-main">
                     {children}
                 </main>
             </div>

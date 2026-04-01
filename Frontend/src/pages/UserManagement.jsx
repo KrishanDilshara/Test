@@ -2,29 +2,37 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import {
     Users, Users2, GraduationCap, CheckSquare, Clock,
-    Search, Edit, Trash2, Shield, Plus
+    Search, Edit, Trash2, Shield, Plus, X
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import "./Dashboard.css";       /* stat-card, page-header, modal styles */
+import "./UserManagement.css";
+
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 const UserManagement = () => {
     const { user: currentUser } = useAuth();
-    const [users, setUsers] = useState([]);
+    const [users, setUsers]   = useState([]);
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState("All Users");
     const [search, setSearch] = useState("");
 
-    // Modal State
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingUser, setEditingUser] = useState(null);
+    const [isModalOpen, setIsModalOpen]   = useState(false);
+    const [editingUser, setEditingUser]   = useState(null);
+    const [formError, setFormError]       = useState("");
+    const [formSuccess, setFormSuccess]   = useState("");
+    const [saving, setSaving]             = useState(false);
+    const [deleteId, setDeleteId]         = useState(null); // confirm dialog
+
     const [formData, setFormData] = useState({
-        firstName: "", lastName: "", email: "", role: "student", status: "Active", password: ""
+        firstName: "", lastName: "", email: "",
+        role: "student", status: "Active", password: ""
     });
 
-    useEffect(() => {
-        fetchUsers();
-    }, []);
+    useEffect(() => { fetchUsers(); }, []);
 
     const fetchUsers = async () => {
+        setLoading(true);
         try {
             const res = await axios.get("http://localhost:5000/user");
             setUsers(res.data);
@@ -36,15 +44,17 @@ const UserManagement = () => {
     };
 
     const handleOpenModal = (user = null) => {
+        setFormError("");
+        setFormSuccess("");
         if (user) {
             setEditingUser(user);
             setFormData({
                 firstName: user.firstName,
-                lastName: user.lastName,
-                email: user.email,
-                role: user.role,
-                status: user.status || "Active",
-                password: "", // Empty for edit unless changing
+                lastName:  user.lastName,
+                email:     user.email,
+                role:      user.role,
+                status:    user.status || "Active",
+                password:  "",
             });
         } else {
             setEditingUser(null);
@@ -53,193 +63,229 @@ const UserManagement = () => {
         setIsModalOpen(true);
     };
 
+    // ── Client-side validation ──────────────────────────────────────
+    const validate = () => {
+        if (!formData.firstName.trim())  return "First name is required.";
+        if (!formData.lastName.trim())   return "Last name is required.";
+        if (!formData.email.trim())      return "Email address is required.";
+        if (!isValidEmail(formData.email)) return "Please enter a valid email address.";
+        if (!editingUser && !formData.password) return "Password is required for new users.";
+        if (!editingUser && formData.password.length < 6)
+            return "Password must be at least 6 characters.";
+        if (!["student", "lecturer", "admin"].includes(formData.role))
+            return "Please select a valid role.";
+        return null;
+    };
+
     const handleSaveUser = async (e) => {
         e.preventDefault();
+        setFormError("");
+        setFormSuccess("");
+
+        const err = validate();
+        if (err) { setFormError(err); return; }
+
+        setSaving(true);
         try {
             if (editingUser) {
-                // Edit User
-                const res = await axios.put(`http://localhost:5000/user/${editingUser._id}`, formData);
-                setUsers(users.map(u => (u._id === editingUser._id ? res.data : u)));
+                // PUT /user/:id  — update existing
+                const res = await axios.put(
+                    `http://localhost:5000/user/${editingUser._id}`,
+                    formData
+                );
+                setUsers(prev => prev.map(u =>
+                    u._id === editingUser._id ? res.data.user : u
+                ));
+                setFormSuccess("User updated successfully.");
+                setTimeout(() => setIsModalOpen(false), 900);
             } else {
-                // Add User (Via Auth Register Endpoint for password hashing)
-                await axios.post("http://localhost:5000/api/auth/register", formData);
-                fetchUsers(); // Re-fetch to get new user with correct default status/dates
+                // POST /user/add  — create new user with password hashing on backend
+                const res = await axios.post("http://localhost:5000/user/add", formData);
+                setFormSuccess(res.data.message || "User added successfully.");
+                fetchUsers();
+                setTimeout(() => setIsModalOpen(false), 900);
             }
-            setIsModalOpen(false);
         } catch (err) {
-            alert("Error saving user");
+            const msg = err.response?.data?.message || "Failed to save user. Please try again.";
+            setFormError(msg);
+        } finally {
+            setSaving(false);
         }
     };
 
     const handleDeleteUser = async (id) => {
-        if (!window.confirm("Are you sure you want to delete this user?")) return;
         try {
             await axios.delete(`http://localhost:5000/user/${id}`);
-            setUsers(users.filter(u => u._id !== id));
+            setUsers(prev => prev.filter(u => u._id !== id));
         } catch (err) {
-            alert("Error deleting user");
+            alert(err.response?.data?.message || "Error deleting user.");
+        } finally {
+            setDeleteId(null);
         }
     };
 
-    // Derived Stats
-    const studentsCount = users.filter(u => u.role === "student").length;
+    // ── Derived values ──────────────────────────────────────────────
+    const studentsCount  = users.filter(u => u.role === "student").length;
     const lecturersCount = users.filter(u => u.role === "lecturer").length;
-    const activeCount = users.filter(u => u.status === "Active").length;
-    const pendingCount = users.filter(u => u.status !== "Active").length; // Assuming non-active is pending/inactive
+    const activeCount    = users.filter(u => u.status === "Active").length;
+    const pendingCount   = users.filter(u => u.status !== "Active").length;
 
-    // Filtering
     const filteredUsers = users.filter(u => {
-        const matchesFilter = filter === "All Users" ||
-            (filter === "Students" && u.role === "student") ||
+        const matchesFilter =
+            filter === "All Users" ||
+            (filter === "Students"  && u.role === "student") ||
             (filter === "Lecturers" && u.role === "lecturer") ||
-            (filter === "Admins" && u.role === "admin");
-        const matchesSearch = u.firstName.toLowerCase().includes(search.toLowerCase()) ||
-            u.lastName.toLowerCase().includes(search.toLowerCase()) ||
-            u.email.toLowerCase().includes(search.toLowerCase());
+            (filter === "Admins"    && u.role === "admin");
+        const matchesSearch =
+            u.firstName?.toLowerCase().includes(search.toLowerCase()) ||
+            u.lastName?.toLowerCase().includes(search.toLowerCase())  ||
+            u.email?.toLowerCase().includes(search.toLowerCase());
         return matchesFilter && matchesSearch;
     });
 
+    const getAvatarClass = (role) => {
+        if (role === "admin")    return "user-avatar avatar-admin";
+        if (role === "lecturer") return "user-avatar avatar-lecturer";
+        return "user-avatar avatar-student";
+    };
+
+    const stats = [
+        { label: "Total Users",      value: users.length,    icon: Users2,        iconClass: "icon-purple"  },
+        { label: "Students",         value: studentsCount,   icon: GraduationCap, iconClass: "icon-amber"   },
+        { label: "Lecturers",        value: lecturersCount,  icon: Shield,        iconClass: "icon-emerald" },
+        { label: "Active",           value: activeCount,     icon: CheckSquare,   iconClass: "icon-green"   },
+        { label: "Pending / Inactive", value: pendingCount,  icon: Clock,         iconClass: "icon-amber"   },
+    ];
+
     return (
-        <div className="space-y-6">
+        <div className="user-management">
 
             {/* Header */}
-            <div className="flex justify-between items-center mb-8">
-                <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                    User Management
-                </h2>
-                <button
-                    onClick={() => handleOpenModal()}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors shadow-lg shadow-blue-500/20"
-                >
-                    <Plus className="w-4 h-4" />
+            <div className="page-header">
+                <h2 className="page-title">User Management</h2>
+                <button onClick={() => handleOpenModal()} className="btn-primary">
+                    <Plus size={16} />
                     Add User
                 </button>
             </div>
 
-            {/* Analytics Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {[
-                    { label: "Total Users", value: users.length, icon: Users2, color: "text-purple-400", bg: "bg-purple-500/10" },
-                    { label: "Students", value: studentsCount, icon: GraduationCap, color: "text-amber-400", bg: "bg-amber-500/10" },
-                    { label: "Lecturers", value: lecturersCount, icon: Shield, color: "text-emerald-400", bg: "bg-emerald-500/10" },
-                    { label: "Active", value: activeCount, icon: CheckSquare, color: "text-green-400", bg: "bg-green-500/10" },
-                    { label: "Pending/Inactive", value: pendingCount, icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10" },
-                ].map((stat, i) => (
-                    <div key={i} className="bg-[#1a1d2d] rounded-2xl p-5 border border-slate-800 shadow-sm relative overflow-hidden group hover:border-slate-700 transition-colors">
-                        <div className={`w-10 h-10 rounded-xl ${stat.bg} ${stat.color} flex items-center justify-center mb-4`}>
-                            <stat.icon className="w-5 h-5" />
+            {/* Stat Cards */}
+            <div className="stats-grid">
+                {stats.map((stat, i) => {
+                    const Icon = stat.icon;
+                    return (
+                        <div key={i} className="stat-card">
+                            <div className={`stat-card-icon ${stat.iconClass}`}>
+                                <Icon size={20} />
+                            </div>
+                            <p className="stat-card-value">{stat.value}</p>
+                            <p className="stat-card-label">{stat.label}</p>
                         </div>
-                        <p className="text-3xl font-bold text-white mb-1">{stat.value}</p>
-                        <p className="text-sm text-slate-400 font-medium">{stat.label}</p>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
 
             {/* Tabs & Search */}
-            <div className="flex flex-col md:flex-row justify-between gap-4 py-4">
-                <div className="flex bg-[#1a1d2d] p-1 rounded-xl border border-slate-800 self-start">
+            <div className="um-toolbar">
+                <div className="tab-bar">
                     {["All Users", "Students", "Lecturers", "Admins"].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setFilter(tab)}
-                            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${filter === tab
-                                    ? "bg-blue-600 text-white shadow-md"
-                                    : "text-slate-400 hover:text-slate-200"
-                                }`}
+                            className={`tab-btn${filter === tab ? " active" : ""}`}
                         >
                             {tab}
                         </button>
                     ))}
                 </div>
 
-                <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Search className="h-4 w-4 text-slate-500" />
-                    </div>
+                <div className="um-search-wrap">
+                    <div className="um-search-icon"><Search size={16} /></div>
                     <input
                         type="text"
                         placeholder="Search users..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
-                        className="w-full md:w-64 bg-[#1a1d2d] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
+                        className="um-search-input"
                     />
                 </div>
             </div>
 
-            {/* Main Table Container */}
-            <div className="bg-[#1a1d2d] rounded-2xl border border-slate-800 overflow-hidden">
-                <div className="p-6 border-b border-slate-800">
-                    <h3 className="text-lg font-bold text-white">Registered Users</h3>
+            {/* Users Table */}
+            <div className="um-table-card">
+                <div className="um-table-header">
+                    <h3 className="um-table-title">Registered Users</h3>
+                    <span style={{ color: "#64748b", fontSize: 13 }}>{filteredUsers.length} users</span>
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-400">
-                        <thead className="text-xs uppercase bg-[#13151f] text-slate-500 border-b border-slate-800 font-semibold tracking-wider">
+                <div className="um-table-wrap">
+                    <table className="um-table">
+                        <thead>
                             <tr>
-                                <th className="px-6 py-4">User</th>
-                                <th className="px-6 py-4">Role</th>
-                                <th className="px-6 py-4">Status</th>
-                                <th className="px-6 py-4">Joined</th>
-                                <th className="px-6 py-4 text-right">Actions</th>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Joined</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800">
+                        <tbody>
                             {loading ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-12 text-center text-slate-500">Loading users...</td>
+                                <tr className="um-empty-row">
+                                    <td colSpan="5">Loading users...</td>
                                 </tr>
                             ) : filteredUsers.length === 0 ? (
-                                <tr>
-                                    <td colSpan="5" className="px-6 py-12 text-center text-slate-500">No users found.</td>
+                                <tr className="um-empty-row">
+                                    <td colSpan="5">No users found.</td>
                                 </tr>
                             ) : (
                                 filteredUsers.map((u) => (
-                                    <tr key={u._id} className="hover:bg-[#1f2235] transition-colors group">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-xs ${u.role === "admin" ? "bg-red-500/80" :
-                                                        u.role === "lecturer" ? "bg-purple-500/80" :
-                                                            "bg-emerald-500/80"
-                                                    }`}>
+                                    <tr key={u._id}>
+                                        <td>
+                                            <div className="user-cell">
+                                                <div className={getAvatarClass(u.role)}>
                                                     {u.firstName?.charAt(0)}{u.lastName?.charAt(0)}
                                                 </div>
                                                 <div>
-                                                    <div className="font-semibold text-slate-200">{u.firstName} {u.lastName}</div>
-                                                    <div className="text-xs text-slate-500">{u.email}</div>
+                                                    <div className="user-name">{u.firstName} {u.lastName}</div>
+                                                    <div className="user-email">{u.email}</div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-4">
-                                            <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded-md text-xs font-medium capitalize">
+                                        <td>
+                                            <span className="role-badge" style={{ textTransform: "capitalize" }}>
                                                 {u.role}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${u.status === "Active"
-                                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                                    : "bg-red-500/10 text-red-400 border-red-500/20"
-                                                }`}>
+                                        <td>
+                                            <span className={u.status === "Active"
+                                                ? "status-badge--active"
+                                                : "status-badge--inactive"}>
                                                 {u.status || "Active"}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-slate-400">
-                                            {new Date(u.createdAt || Date.now()).toISOString().split('T')[0]}
+                                        <td style={{ color: "#64748b", whiteSpace: "nowrap" }}>
+                                            {u.createdAt
+                                                ? new Date(u.createdAt).toLocaleDateString()
+                                                : "—"}
                                         </td>
-                                        <td className="px-6 py-4 text-right space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                                onClick={() => handleOpenModal(u)}
-                                                className="p-1.5 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 rounded-lg transition-colors border border-transparent hover:border-blue-500/20"
-                                                title="Edit User"
-                                            >
-                                                <Edit className="w-4 h-4" />
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteUser(u._id)}
-                                                className="p-1.5 text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors border border-transparent hover:border-red-500/20"
-                                                title="Delete User"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                        <td>
+                                            <div className="um-actions">
+                                                <button
+                                                    onClick={() => handleOpenModal(u)}
+                                                    className="um-action-btn um-action-btn--edit"
+                                                    title="Edit User"
+                                                >
+                                                    <Edit size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeleteId(u._id)}
+                                                    className="um-action-btn um-action-btn--delete"
+                                                    title="Delete User"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))
@@ -249,117 +295,195 @@ const UserManagement = () => {
                 </div>
             </div>
 
-            {/* Modal matching EduCore UI */}
+            {/* ── ADD / EDIT MODAL ── */}
             {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-[#1a1d2d] rounded-2xl shadow-2xl w-full max-w-md border border-slate-700 overflow-hidden">
-                        <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-[#13151f]/50">
-                            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                <Users className="w-5 h-5 text-blue-500" />
-                                {editingUser ? "Edit User" : "+ Add User"}
+                <div className="modal-overlay">
+                    <div className="modal modal--md">
+                        <div className="modal-header">
+                            <h3 className="modal-title">
+                                <Users size={20} className="modal-title-icon" />
+                                {editingUser ? "Edit User" : "Add New User"}
                             </h3>
                             <button
                                 onClick={() => setIsModalOpen(false)}
-                                className="text-slate-400 hover:text-white transition-colors"
+                                className="modal-close-btn"
+                                type="button"
                             >
-                                &times;
+                                <X size={18} />
                             </button>
                         </div>
 
-                        <form onSubmit={handleSaveUser} className="p-6 space-y-4">
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">First Name *</label>
+                        <form onSubmit={handleSaveUser} noValidate>
+                            <div className="modal-body">
+
+                                {/* Inline error / success banners */}
+                                {formError && (
+                                    <div style={{
+                                        background: "rgba(239,68,68,0.12)",
+                                        border: "1px solid rgba(239,68,68,0.3)",
+                                        color: "#f87171",
+                                        borderRadius: 8,
+                                        padding: "10px 14px",
+                                        fontSize: 14,
+                                        marginBottom: 14,
+                                    }}>
+                                        {formError}
+                                    </div>
+                                )}
+                                {formSuccess && (
+                                    <div style={{
+                                        background: "rgba(16,185,129,0.12)",
+                                        border: "1px solid rgba(16,185,129,0.3)",
+                                        color: "#34d399",
+                                        borderRadius: 8,
+                                        padding: "10px 14px",
+                                        fontSize: 14,
+                                        marginBottom: 14,
+                                    }}>
+                                        {formSuccess}
+                                    </div>
+                                )}
+
+                                <div className="modal-row">
+                                    <div className="modal-field">
+                                        <label>First Name *</label>
+                                        <input
+                                            type="text"
+                                            className="modal-input"
+                                            placeholder="Enter first name"
+                                            value={formData.firstName}
+                                            onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                                        />
+                                    </div>
+                                    <div className="modal-field">
+                                        <label>Last Name *</label>
+                                        <input
+                                            type="text"
+                                            className="modal-input"
+                                            placeholder="Enter last name"
+                                            value={formData.lastName}
+                                            onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="modal-field">
+                                    <label>Email Address *</label>
                                     <input
-                                        type="text"
-                                        required
-                                        className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm"
-                                        value={formData.firstName}
-                                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                                        type="email"
+                                        className="modal-input"
+                                        placeholder="user@example.com"
+                                        value={formData.email}
+                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                                     />
                                 </div>
-                                <div className="flex-1">
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Last Name *</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm"
-                                        value={formData.lastName}
-                                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                                    />
+
+                                <div className="modal-row">
+                                    <div className="modal-field">
+                                        <label>Role *</label>
+                                        <select
+                                            className="modal-input"
+                                            value={formData.role}
+                                            onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                                        >
+                                            <option value="student">Student</option>
+                                            <option value="lecturer">Lecturer</option>
+                                            <option value="admin">Admin</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="modal-field">
+                                        <label>Status *</label>
+                                        <select
+                                            className="modal-input"
+                                            value={formData.status}
+                                            onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                                        >
+                                            <option value="Active">Active</option>
+                                            <option value="Inactive">Inactive</option>
+                                        </select>
+                                    </div>
                                 </div>
+
+                                {/* Password only shown when creating a new user */}
+                                {!editingUser && (
+                                    <div className="modal-field">
+                                        <label>Password * <span style={{ color: "#475569", fontSize: 12, fontWeight: 400 }}>(min. 6 characters)</span></label>
+                                        <input
+                                            type="password"
+                                            className="modal-input"
+                                            placeholder="Enter password"
+                                            value={formData.password}
+                                            onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                        />
+                                    </div>
+                                )}
+
                             </div>
 
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Email Address *</label>
-                                <input
-                                    type="email"
-                                    required
-                                    className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm"
-                                    value={formData.email}
-                                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                />
-                            </div>
-
-                            <div className="flex gap-4">
-                                <div className="flex-1">
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Role *</label>
-                                    <select
-                                        className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm appearance-none"
-                                        value={formData.role}
-                                        onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                                    >
-                                        <option value="student">Student</option>
-                                        <option value="lecturer">Lecturer</option>
-                                        <option value="admin">Admin</option>
-                                    </select>
-                                </div>
-
-                                <div className="flex-1">
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Status *</label>
-                                    <select
-                                        className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm appearance-none"
-                                        value={formData.status}
-                                        onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                    >
-                                        <option value="Active">Active</option>
-                                        <option value="Inactive">Inactive</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            {!editingUser && (
-                                <div>
-                                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Password *</label>
-                                    <input
-                                        type="password"
-                                        required={!editingUser}
-                                        className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-sm"
-                                        value={formData.password}
-                                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    />
-                                </div>
-                            )}
-
-                            <div className="pt-4 flex justify-end gap-3 border-t border-slate-800 mt-6">
+                            <div className="modal-footer">
                                 <button
                                     type="button"
                                     onClick={() => setIsModalOpen(false)}
-                                    className="px-5 py-2.5 text-sm font-medium text-slate-300 hover:text-white bg-transparent border border-slate-700 rounded-xl hover:bg-slate-800 transition-colors"
+                                    className="btn-cancel"
+                                    disabled={saving}
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-5 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-500/20 transition-all"
+                                    className="btn-save"
+                                    disabled={saving}
                                 >
-                                    {editingUser ? "Update User" : "Save User"}
+                                    {saving
+                                        ? "Saving..."
+                                        : editingUser ? "Update User" : "Add User"}
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
+
+            {/* ── DELETE CONFIRMATION DIALOG ── */}
+            {deleteId && (
+                <div className="modal-overlay">
+                    <div className="modal" style={{ maxWidth: 420 }}>
+                        <div className="modal-header">
+                            <h3 className="modal-title" style={{ color: "#f87171" }}>
+                                Delete User
+                            </h3>
+                            <button onClick={() => setDeleteId(null)} className="modal-close-btn" type="button">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="modal-body">
+                            <p style={{ color: "#94a3b8", lineHeight: 1.6 }}>
+                                Are you sure you want to delete this user?
+                                This action <strong style={{ color: "#f87171" }}>cannot be undone</strong>.
+                            </p>
+                        </div>
+                        <div className="modal-footer">
+                            <button
+                                type="button"
+                                onClick={() => setDeleteId(null)}
+                                className="btn-cancel"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleDeleteUser(deleteId)}
+                                className="btn-save"
+                                style={{ background: "rgba(239,68,68,0.2)", color: "#f87171", borderColor: "rgba(239,68,68,0.3)" }}
+                            >
+                                Yes, Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </div>
     );
 };

@@ -1,4 +1,5 @@
 const StudyGoal = require("../models/StudyGoal");
+const User = require("../models/User");
 
 // =====================
 // GET ALL GOALS
@@ -14,7 +15,8 @@ exports.getAllGoals = async (req, res) => {
         // Using populate to get student details so the frontend can show "Assigned To"
         const goals = await StudyGoal.find(query)
             .populate("user", "firstName lastName email")
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
         res.json(goals);
     } catch (err) {
         console.error(err);
@@ -105,6 +107,67 @@ exports.deleteGoal = async (req, res) => {
 
         await goal.deleteOne();
         res.json("Goal deleted");
+    } catch (err) {
+        console.error(err);
+        res.status(500).json("Server Error");
+    }
+};
+
+// =====================
+// GET LEADERBOARD
+// Aggregates all student goals, ranks by completions + progress score
+// =====================
+exports.getLeaderboard = async (req, res) => {
+    try {
+        const leaderboard = await StudyGoal.aggregate([
+            {
+                $group: {
+                    _id:            "$user",
+                    totalGoals:     { $sum: 1 },
+                    completedGoals: { $sum: { $cond: [{ $eq: ["$status", "Completed"] }, 1, 0] } },
+                    inProgress:     { $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] } },
+                    avgProgress:    { $avg: "$progress" },
+                }
+            },
+            {
+                $addFields: {
+                    score: {
+                        $add: [
+                            { $multiply: ["$completedGoals", 100] },
+                            { $round: [{ $ifNull: ["$avgProgress", 0] }, 0] }
+                        ]
+                    }
+                }
+            },
+            { $sort: { score: -1, completedGoals: -1 } },
+            {
+                $lookup: {
+                    from:         "users",
+                    localField:   "_id",
+                    foreignField: "_id",
+                    as:           "userInfo"
+                }
+            },
+            { $unwind: "$userInfo" },
+            // (no role filter — show all users who have goals)
+            {
+                $project: {
+                    _id:            1,
+                    totalGoals:     1,
+                    completedGoals: 1,
+                    inProgress:     1,
+                    avgProgress:    { $round: ["$avgProgress", 1] },
+                    score:          1,
+                    firstName:      "$userInfo.firstName",
+                    lastName:       "$userInfo.lastName",
+                    email:          "$userInfo.email",
+                    role:           "$userInfo.role",
+                }
+            }
+        ]);
+
+        const ranked = leaderboard.map((entry, i) => ({ ...entry, rank: i + 1 }));
+        res.json(ranked);
     } catch (err) {
         console.error(err);
         res.status(500).json("Server Error");

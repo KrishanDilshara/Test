@@ -1,18 +1,33 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
-import { Mail, Lock, User, UserPlus } from "lucide-react";
+import { Mail, Lock, User, UserPlus, Eye, EyeOff, X } from "lucide-react";
+import "./Auth.css";
+
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const isValidName = (name) => /^[a-zA-Z\s]+$/.test(name);
 
 const Register = () => {
-    const { register } = useAuth();
+    const { register, user } = useAuth();
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (user) {
+            navigate("/dashboard");
+        }
+    }, [user, navigate]);
 
     const [formData, setFormData] = useState({
         firstName: "",
         lastName: "",
         email: "",
         password: "",
+        confirmPassword: "",
     });
+
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
 
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
@@ -20,13 +35,49 @@ const Register = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError("");
+
+        if (!formData.firstName.trim()) {
+            return setError("First name is required.");
+        }
+        if (!isValidName(formData.firstName.trim())) {
+            return setError("First name can only contain letters and spaces.");
+        }
+        if (!formData.lastName.trim()) {
+            return setError("Last name is required.");
+        }
+        if (!isValidName(formData.lastName.trim())) {
+            return setError("Last name can only contain letters and spaces.");
+        }
+        if (!formData.email.trim()) {
+            return setError("Email address is required.");
+        }
+        if (!isValidEmail(formData.email.trim())) {
+            return setError("Please enter a valid email address.");
+        }
+        if (!formData.password) {
+            return setError("Password is required.");
+        }
+        if (formData.password.length < 6) {
+            return setError("Password must be at least 6 characters.");
+        }
+        if (formData.password !== formData.confirmPassword) {
+            return setError("Passwords do not match.");
+        }
+        if (!agreedToTerms) {
+            return setError("You must agree to the Terms & Conditions.");
+        }
+
         setLoading(true);
         try {
-            await register(formData);
-            // redirect to login upon success
+            // We omit confirmPassword when sending to the backend
+            const { confirmPassword, ...dataToSubmit } = formData;
+            await register(dataToSubmit);
             navigate("/login");
         } catch (err) {
-            setError(err.response?.data || "Failed to register. Please try again.");
+            const msg = err.response?.data?.message
+                || err.response?.data
+                || "Failed to register. Please try again.";
+            setError(typeof msg === "string" ? msg : "Failed to register. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -37,55 +88,55 @@ const Register = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4 sm:px-6 lg:px-8">
-            <div className="max-w-md w-full space-y-8 bg-slate-800 p-8 rounded-2xl shadow-xl border border-slate-700 relative overflow-hidden">
-                {/* Decorative blobs */}
-                <div className="absolute top-0 right-0 -mr-8 -mt-8 w-32 h-32 rounded-full bg-sky-500/20 blur-2xl"></div>
-                <div className="absolute bottom-0 left-0 -ml-8 -mb-8 w-32 h-32 rounded-full bg-indigo-500/20 blur-2xl"></div>
-
-                <div className="relative z-10">
-                    <h2 className="mt-2 text-center text-3xl font-extrabold text-white">
-                        Create an Account
-                    </h2>
-                    <p className="mt-2 text-center text-sm text-slate-400">
-                        Join to manage your study goals
-                    </p>
+        <div className="auth-split-screen">
+            {/* Left Banner */}
+            <div className="auth-banner">
+                <div className="auth-banner-content">
+                    <h1>Join EduCore</h1>
+                    <p>Create your account today and start managing your academic journey with a modern and secure experience.</p>
                 </div>
+            </div>
 
-                <form className="mt-8 space-y-6 relative z-10" onSubmit={handleSubmit}>
-                    {error && (
-                        <div className="bg-red-500/10 border border-red-500/50 text-red-400 text-sm p-3 rounded-lg text-center">
-                            {error}
-                        </div>
-                    )}
+            {/* Right Form */}
+            <div className="auth-form-container">
+                <div className="auth-card">
+                    <button className="auth-close" onClick={() => navigate("/")} aria-label="Close">
+                        <X size={20} />
+                    </button>
 
-                    <div className="space-y-4 rounded-md shadow-sm">
-                        <div className="flex space-x-4">
-                            <div className="relative w-1/2">
-                                <label htmlFor="firstName" className="sr-only">First Name</label>
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <User className="h-5 w-5 text-slate-400" />
-                                </div>
+                    <div className="auth-header">
+                        <h2>Create Account</h2>
+                        <p>Join us today! Fill in your details to get started.</p>
+                    </div>
+
+                    <form className="auth-form" onSubmit={handleSubmit}>
+                        {error && (
+                            <div className="auth-error">{error}</div>
+                        )}
+
+                        <div className="auth-name-row">
+                            <div className="auth-field">
+                                <div className="auth-field-icon"><User size={18} /></div>
                                 <input
                                     id="firstName"
                                     name="firstName"
                                     type="text"
                                     required
-                                    className="appearance-none rounded-xl relative block w-full px-3 py-3 pl-10 border border-slate-600 bg-slate-700/50 placeholder-slate-400 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent sm:text-sm transition-all"
+                                    className="auth-input"
                                     placeholder="First Name"
                                     value={formData.firstName}
                                     onChange={handleChange}
                                 />
                             </div>
 
-                            <div className="relative w-1/2">
-                                <label htmlFor="lastName" className="sr-only">Last Name</label>
+                            <div className="auth-field">
+                                <div className="auth-field-icon"><User size={18} /></div>
                                 <input
                                     id="lastName"
                                     name="lastName"
                                     type="text"
                                     required
-                                    className="appearance-none rounded-xl relative block w-full px-3 py-3 pl-4 border border-slate-600 bg-slate-700/50 placeholder-slate-400 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent sm:text-sm transition-all"
+                                    className="auth-input"
                                     placeholder="Last Name"
                                     value={formData.lastName}
                                     onChange={handleChange}
@@ -93,67 +144,98 @@ const Register = () => {
                             </div>
                         </div>
 
-                        <div className="relative">
-                            <label htmlFor="email-address" className="sr-only">Email address</label>
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <Mail className="h-5 w-5 text-slate-400" />
-                            </div>
+                        <div className="auth-field">
+                            <div className="auth-field-icon"><Mail size={18} /></div>
                             <input
                                 id="email-address"
                                 name="email"
                                 type="email"
                                 autoComplete="email"
                                 required
-                                className="appearance-none rounded-xl relative block w-full px-3 py-3 pl-10 border border-slate-600 bg-slate-700/50 placeholder-slate-400 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent sm:text-sm transition-all"
-                                placeholder="Email address"
+                                className="auth-input"
+                                placeholder="Email Address"
                                 value={formData.email}
                                 onChange={handleChange}
                             />
                         </div>
 
-                        <div className="relative">
-                            <label htmlFor="password" className="sr-only">Password</label>
-                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <Lock className="h-5 w-5 text-slate-400" />
-                            </div>
+                        <div className="auth-field">
+                            <div className="auth-field-icon"><Lock size={18} /></div>
                             <input
                                 id="password"
                                 name="password"
-                                type="password"
+                                type={showPassword ? "text" : "password"}
                                 autoComplete="new-password"
                                 required
-                                className="appearance-none rounded-xl relative block w-full px-3 py-3 pl-10 border border-slate-600 bg-slate-700/50 placeholder-slate-400 text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent sm:text-sm transition-all"
+                                className="auth-input"
                                 placeholder="Password"
                                 value={formData.password}
                                 onChange={handleChange}
                             />
+                            <button
+                                type="button"
+                                className="auth-password-toggle"
+                                onClick={() => setShowPassword(!showPassword)}
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
                         </div>
-                    </div>
 
-                    <div>
+                        <div className="auth-field">
+                            <div className="auth-field-icon"><Lock size={18} /></div>
+                            <input
+                                id="confirmPassword"
+                                name="confirmPassword"
+                                type={showConfirmPassword ? "text" : "password"}
+                                autoComplete="new-password"
+                                required
+                                className="auth-input"
+                                placeholder="Confirm Password"
+                                value={formData.confirmPassword}
+                                onChange={handleChange}
+                            />
+                            <button
+                                type="button"
+                                className="auth-password-toggle"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            >
+                                {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                        </div>
+
+                        <label className="terms-checkbox">
+                            <input
+                                type="checkbox"
+                                required
+                                checked={agreedToTerms}
+                                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                            />
+                            <span>I agree to the <Link to="#">Terms & Conditions</Link></span>
+                        </label>
+
                         <button
                             type="submit"
                             disabled={loading}
-                            className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-sky-600 hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="auth-btn"
                         >
-                            <span className="absolute left-0 inset-y-0 flex items-center pl-3">
+                            <span className="auth-btn-icon">
                                 {loading ? (
-                                    <div className="h-5 w-5 border-t-2 border-b-2 border-white rounded-full animate-spin"></div>
+                                    <div className="auth-spinner"></div>
                                 ) : (
-                                    <UserPlus className="h-5 w-5 text-sky-400 group-hover:text-sky-300 transition-colors" />
+                                    <UserPlus size={18} />
                                 )}
                             </span>
-                            {loading ? "Creating..." : "Create Account"}
+                            {loading ? "Creating..." : "Create My Account"}
                         </button>
-                    </div>
 
-                    <div className="text-center text-sm text-slate-400 mt-4">
-                        Already have an account?{" "}
-                        <Link to="/login" className="font-medium text-sky-400 hover:text-sky-300 transition-colors">
-                            Sign in
-                        </Link>
-                    </div>
-                </form>
+                        <div className="auth-footer-text">
+                            Already have an account?{" "}
+                            <Link to="/login" className="auth-link">
+                                Sign In
+                            </Link>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     );
